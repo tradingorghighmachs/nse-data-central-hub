@@ -1,0 +1,78 @@
+name: NSE Central Hub Daily Streamer
+
+on:
+  schedule:
+    # Morning Session: 03:45 UTC is 09:15 AM IST (Runs 9:15 AM to 12:30 PM)
+    - cron: '45 3 * * 1-5'
+    # Afternoon Session: 07:00 UTC is 12:30 PM IST (Runs 12:30 PM to 03:30 PM)
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch: # Allows manual trigger from the GitHub UI
+
+jobs:
+  run-hub:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libzmq3-dev build-essential
+
+      - name: Install Python Dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install requests
+
+      - name: Determine Session Duration
+        run: |
+          if [[ "${{ github.event.schedule }}" == "45 3 * * 1-5" ]]; then
+            echo "RUN_DURATION_SECONDS=11700" >> $GITHUB_ENV
+            echo "SESSION_NAME=Morning" >> $GITHUB_ENV
+          elif [[ "${{ github.event.schedule }}" == "0 7 * * 1-5" ]]; then
+            echo "RUN_DURATION_SECONDS=10800" >> $GITHUB_ENV
+            echo "SESSION_NAME=Afternoon" >> $GITHUB_ENV
+          else
+            # Default for manual runs (runs for 6.25 hours = 22500 seconds, which is 9:15 AM to 3:30 PM)
+            # Note: 6 hours and 15 mins (22500s) is slightly above GitHub's 6h limit (21600s),
+            # so we cap manual runs at 5.75 hours (20700s) to guarantee the packaging step runs successfully!
+            echo "RUN_DURATION_SECONDS=20700" >> $GITHUB_ENV
+            echo "SESSION_NAME=Manual" >> $GITHUB_ENV
+          fi
+
+      - name: Run Data Streamer
+        env:
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          NSE_BASE_URL: ${{ secrets.NSE_BASE_URL }}
+          NSE_STREAMER_URL: ${{ secrets.NSE_STREAMER_URL }}
+          NSE_ARCHIVE_URL: ${{ secrets.NSE_ARCHIVE_URL }}
+        run: |
+          python -u run_for_duration.py
+
+      - name: Package Data Lake logs
+        if: always() # Make sure we archive even if the run was interrupted
+        run: |
+          echo "[*] Packaging data lake directory..."
+          tar -czf daily_ticks_data.tar.gz -C ./data_lake . || echo "No logs found to compress"
+
+      - name: Create Release in Public Data Repo
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.DATA_REPO_PAT }}
+          repository: highmachs/nse-historical-ticks
+          tag_name: nse-ticks-${{ env.SESSION_NAME }}-${{ github.run_id }}
+          name: NSE Ticks (${{ env.SESSION_NAME }}) - ${{ github.run_id }}
+          draft: false
+          prerelease: false
+          files: daily_ticks_data.tar.gz

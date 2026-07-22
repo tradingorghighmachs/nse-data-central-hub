@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  central_hub:
+    build: .
+    container_name: nse_central_hub
+    restart: always
+    ports:
+      # Map ports to host just in case you need to debug from Windows directly
+      - "5555:5555"
+      - "41937:41937"
+    volumes:
+      # Mount the data lake folder so the JSONL files are permanently saved to your Windows host
+      - ./data_lake:/app/data_lake
+    networks:
+      - nse_market_net
+
+# Create an EXTERNAL shared network. 
+# Your 4 other projects will attach to this network to talk to the hub!
+networks:
+  nse_market_net:
+    name: nse_market_net
+    driver: bridge

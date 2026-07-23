@@ -62,8 +62,11 @@ jobs:
       - name: Package Data Lake logs
         if: always() # Make sure we archive even if the run was interrupted
         run: |
-          echo "[*] Packaging data lake directory..."
-          tar -czf daily_ticks_data.tar.gz -C ./data_lake . || echo "No logs found to compress"
+          DATE_STR=$(date +'%d%m%Y')
+          FILE_NAME="nse_ticks_${{ env.SESSION_NAME }}_${DATE_STR}.tar.gz"
+          echo "[*] Packaging data lake directory as ${FILE_NAME}..."
+          tar -czf "${FILE_NAME}" -C ./data_lake . || echo "No logs found to compress"
+          echo "ARCHIVE_FILE=${FILE_NAME}" >> $GITHUB_ENV
 
       - name: Create Release in Public Data Repo
         if: always()
@@ -75,4 +78,5 @@ jobs:
           name: NSE Ticks (${{ env.SESSION_NAME }}) - ${{ github.run_id }}
           draft: false
           prerelease: false
-          files: daily_ticks_data.tar.gz
+          files: ${{ env.ARCHIVE_FILE }}
+
